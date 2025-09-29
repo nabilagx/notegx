@@ -1,5 +1,6 @@
 ````markdown
 # PostgreSQL Logical Replication dengan Docker
+````markdown
 
 ## Tujuan
 Membuat sinkronisasi tabel tertentu (`data_penting`) dari publisher ke subscriber menggunakan **logical replication** PostgreSQL.
