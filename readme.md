@@ -1,5 +1,20 @@
 # PostgreSQL Logical Replication dengan Docker
 
+## 📑 Table of Contents
+- [Tujuan](#-tujuan)
+  - [Keuntungan Logical vs Physical](#-keuntungan-logical-vs-physical)
+- [1. Setup Docker Network & Containers](#-1-setup-docker-network--containers)
+- [2. Konfigurasi Publisher](#-2-konfigurasi-publisher)
+- [3. Buat Tabel & Publication di Publisher](#-3-buat-tabel--publication-di-publisher)
+- [4. Buat Tabel di Subscriber](#-4-buat-tabel-di-subscriber)
+- [5. Buat Subscription](#-5-buat-subscription)
+- [6. Test Sinkronisasi](#-6-test-sinkronisasi)
+- [7. Common Errors & Solusi](#-7-common-errors--solusi)
+- [8. Tips & Trik](#-8-tips--trik)
+- [9. Step-by-Step Ringkas](#-9-step-by-step-ringkas)
+- [10. Kesimpulan](#-10-kesimpulan)
+
+
 ## 📌 Tujuan
 Membuat sinkronisasi tabel tertentu (`data_penting`) dari **publisher** ke **subscriber** menggunakan **logical replication** PostgreSQL.
 
