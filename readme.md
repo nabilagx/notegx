@@ -1,191 +1,141 @@
-# PostgreSQL Logical Replication dengan Docker
+# 🚀 README DEMO: Load Balancing & Read-Write Splitting dengan Pgpool-II
 
-## 📑 Table of Contents
-- [Tujuan](#-tujuan)
-  - [Keuntungan Logical vs Physical](#-keuntungan-logical-vs-physical)
-- [1. Setup Docker Network & Containers](#-1-setup-docker-network--containers)
-- [2. Konfigurasi Publisher](#-2-konfigurasi-publisher)
-- [3. Buat Tabel & Publication di Publisher](#-3-buat-tabel--publication-di-publisher)
-- [4. Buat Tabel di Subscriber](#-4-buat-tabel-di-subscriber)
-- [5. Buat Subscription](#-5-buat-subscription)
-- [6. Test Sinkronisasi](#-6-test-sinkronisasi)
-- [7. Common Errors & Solusi](#-7-common-errors--solusi)
-- [8. Tips & Trik](#-8-tips--trik)
-- [9. Step-by-Step Ringkas](#-9-step-by-step-ringkas)
-- [10. Kesimpulan](#-10-kesimpulan)
+## 🧩 Pendahuluan
 
+Demo ini bertujuan membuktikan bahwa arsitektur **database terdistribusi** yang terdiri dari:
 
-## 📌 Tujuan
-Membuat sinkronisasi tabel tertentu (`data_penting`) dari **publisher** ke **subscriber** menggunakan **logical replication** PostgreSQL.
+* **PostgreSQL Master (primary_db)**
+* **PostgreSQL Slave (secondary_db)**
+* **Pgpool-II Proxy (pgpool_proxy)**
 
-### 🔑 Keuntungan Logical vs Physical
-- Logical → pilih tabel tertentu, bisa filter data/kolom, lintas versi PostgreSQL
-- Physical → clone seluruh DB, cocok untuk HA / backup
+berhasil melakukan **Read-Write Splitting** dan **Load Balancing**.
 
 ---
 
-## 📂 1. Setup Docker Network & Containers
+## ⚙️ Arsitektur Server
 
-```powershell
-# Create network (skip jika sudah ada)
-docker network create pgnet
-
-# Publisher
-docker run -d --name pg_publisher --network pgnet \
-  -e POSTGRES_PASSWORD=pass_publisher \
-  -v pgdata_pub:/var/lib/postgresql/data \
-  -p 5432:5432 postgres:14
-
-# Subscriber
-docker run -d --name pg_subscriber --network pgnet \
-  -e POSTGRES_PASSWORD=pass_subscriber \
-  -v pgdata_sub:/var/lib/postgresql/data \
-  -p 5433:5432 postgres:14
-```
-
-> 💡 **Tips:** Gunakan custom network supaya container bisa connect tanpa expose banyak port.  
-> Cek container dengan: `docker ps`
+| Server     | Kontainer      | Port | Fungsi                                   |
+| :--------- | :------------- | :--- | :--------------------------------------- |
+| **Master** | `primary_db`   | 5432 | Menerima query **WRITE (INSERT/UPDATE)** |
+| **Slave**  | `secondary_db` | 5433 | Menerima query **READ (SELECT)**         |
+| **Proxy**  | `pgpool_proxy` | 9999 | Load Balancer & Query Router             |
 
 ---
 
-## ⚙️ 2. Konfigurasi Publisher
+## 🧱 1. Persiapan Awal — Verifikasi Replikasi
 
-```sql
-ALTER SYSTEM SET wal_level='logical';
-ALTER SYSTEM SET max_replication_slots=10;
-ALTER SYSTEM SET max_wal_senders=10;
-ALTER SYSTEM SET max_worker_processes=10;
-```
+**Asumsi:**
+Docker Compose sudah dijalankan dengan `docker compose up -d`, dan Pgpool sudah aktif.
 
-```powershell
-docker restart pg_publisher
-```
+### A. Verifikasi Status Koneksi (Master)
 
-```sql
--- Buat role replication
-CREATE ROLE repl_role WITH REPLICATION LOGIN PASSWORD 'replica_pass';
-```
-
-Tambahkan di `pg_hba.conf`:
+**Tujuan:** Pastikan Slave (`secondary_db`) tersambung ke Master (`primary_db`) dan replikasi aktif.
 
 ```bash
-docker exec -u root pg_publisher bash -c \
-  'echo "host replication repl_role 0.0.0.0/0 md5" >> /var/lib/postgresql/data/pg_hba.conf'
-docker restart pg_publisher
+docker exec -it primary_db psql -U admin -d main_db \
+-c "SELECT client_addr, state FROM pg_stat_replication;"
+```
+
+**Hasil Diharapkan:**
+Tampil satu baris dengan `state = streaming`, artinya Slave sedang menyalin data dari Master.
+
+---
+
+### B. Verifikasi Data (Slave)
+
+**Tujuan:** Memastikan Slave memiliki tabel yang sama dengan Master.
+
+```bash
+docker exec -it secondary_db psql -U admin -d main_db \
+-c "SELECT * FROM products;"
+```
+
+**Hasil Diharapkan:**
+Tabel `products` muncul (walau kosong).
+
+---
+
+## 💾 2. DEMO 1 — Read-Write Splitting
+
+> 🎓 **Pertanyaan Dosen:** “Silakan didemokan Read-Write Splitting.”
+
+### A. Uji WRITE (INSERT) melalui Proxy
+
+**Tujuan:** Membuktikan query `INSERT` diarahkan ke Master (`primary_db`).
+
+```bash
+echo "--- Uji WRITE via Proxy (Port 9999) ---"
+
+docker exec -it pgpool_proxy psql -h localhost -p 9999 -U admin -d main_db \
+-c "INSERT INTO products (item_name, price) VALUES ('Produk Uji A', 100000);"
+```
+
+🗣️ **Penjelasan:**
+Karena ini query **WRITE**, Pgpool-II otomatis merutekannya ke **Master** untuk menjaga konsistensi data.
+
+---
+
+### B. Verifikasi Split (Master)
+
+**Tujuan:** Memastikan data berhasil ditulis di Master.
+
+```bash
+docker exec -it primary_db psql -U admin -d main_db \
+-c "SELECT * FROM products WHERE item_name = 'Produk Uji A';"
+```
+
+**Hasil Diharapkan:**
+Data `'Produk Uji A'` muncul di tabel Master.
+
+---
+
+## ⚖️ 3. DEMO 2 — Load Balancing
+
+> 🎓 **Pertanyaan Dosen:** “Mana buktinya Load Balancing?”
+
+### A. Uji READ (SELECT) sebanyak 5 kali via Proxy
+
+**Tujuan:** Menghasilkan traffic SELECT agar Pgpool mencatat distribusi beban.
+
+```bash
+echo "--- Uji SELECT 5 Kali untuk Load Balancing ---"
+
+# Jalankan 5x
+docker exec -it pgpool_proxy psql -h localhost -p 9999 -U admin -d main_db \
+-c "SELECT pg_backend_pid();"
+# ... (ulang total 5 kali)
 ```
 
 ---
 
-## 🗂 3. Buat Tabel & Publication di Publisher
+### B. Bukti Visual Load Balancing (Counter)
 
-```sql
-CREATE TABLE data_penting (
-  id SERIAL PRIMARY KEY,
-  nama TEXT,
-  harga INT
-);
+**Tujuan:** Menunjukkan hasil perhitungan `select_cnt` pada tiap node.
 
-CREATE PUBLICATION pub_bisnis FOR TABLE data_penting;
-
-INSERT INTO data_penting (nama,harga) VALUES ('Sepatu A',500000);
+```bash
+docker exec -it pgpool_proxy psql -h localhost -p 9999 -U admin -d main_db \
+-c "SHOW pool_nodes;"
 ```
 
-> **Note:** Publication hanya berlaku untuk tabel yang dipilih.
+| Kolom          | Node 0 (Master) | Node 1 (Slave) | Penjelasan                                                     |
+| :------------- | :-------------- | :------------- | :------------------------------------------------------------- |
+| **lb_weight**  | 0.000000        | 1.000000       | Master tidak menerima SELECT; semua SELECT dialihkan ke Slave. |
+| **select_cnt** | 0               | 5              | Terbukti: Slave menerima seluruh beban baca.                   |
+
+💡 **Interpretasi:**
+Master bebas dari beban baca (SELECT), sementara Slave menangani semua query baca dengan load balancing ideal **(100% SELECT ke Slave).**
 
 ---
 
-## 🗂 4. Buat Tabel di Subscriber
+## 🏁 4. Kesimpulan
 
-Jika `copy_data=false`, buat tabel manual:
+| Aspek                    | Hasil                                                        |
+| :----------------------- | :----------------------------------------------------------- |
+| **Read-Write Splitting** | Query WRITE → Master, Query READ → Slave ✅                   |
+| **Load Balancing**       | 100% query SELECT dialihkan ke Slave ✅                       |
+| **Efektivitas**          | Master fokus pada penulisan data, Slave menangani pembacaan. |
 
-```sql
-CREATE TABLE data_penting (
-  id SERIAL PRIMARY KEY,
-  nama TEXT,
-  harga INT
-);
-```
+🗣️ **Pernyataan Akhir:**
 
----
+> “Dengan ini kami membuktikan bahwa arsitektur PostgreSQL + Pgpool-II kami berhasil menjalankan *Read-Write Splitting* dan *Load Balancing* sesuai tujuan proyek.”
 
-## 🔗 5. Buat Subscription
-
-```sql
-CREATE SUBSCRIPTION sub_bisnis
-CONNECTION 'host=pg_publisher port=5432 user=repl_role password=replica_pass dbname=postgres'
-PUBLICATION pub_bisnis
-WITH (copy_data = true);
-```
-
-> 💡 **Tips:**  
-> - Jika error `relation "public.data_penting" does not exist` → buat tabel dulu.  
-> - Jika subscription sudah ada → hapus dengan `DROP SUBSCRIPTION sub_bisnis;`.
-
----
-
-## ✅ 6. Test Sinkronisasi
-
-Publisher:
-
-```sql
-INSERT INTO data_penting (nama,harga) VALUES ('Tas B',850000);
-```
-
-Subscriber:
-
-```sql
-SELECT * FROM data_penting;
-```
-
-Jika data tidak muncul:
-
-```sql
-SELECT * FROM pg_stat_subscription;
-ALTER SUBSCRIPTION sub_bisnis ENABLE;
-```
-
-Reset ID:
-
-```sql
-TRUNCATE TABLE data_penting RESTART IDENTITY;
-```
-
----
-
-## 🛠 7. Common Errors & Solusi
-
-| Error                                           | Solusi                                                      |
-| ----------------------------------------------- | ----------------------------------------------------------- |
-| `relation "public.data_penting" does not exist` | Buat tabel di subscriber dulu, atau pakai `copy_data=false` |
-| `could not drop relation mapping`               | Drop subscription dulu sebelum drop tabel                   |
-| Duplicate subscription                          | `DROP SUBSCRIPTION sub_bisnis;` sebelum create lagi         |
-
----
-
-## 💡 8. Tips & Trik
-
-- `TRUNCATE ... RESTART IDENTITY` → reset SERIAL id  
-- `copy_data=true` → copy data awal (sekali saja)  
-- Bisa punya >1 subscriber (beda dengan physical replication)  
-- PostgreSQL 15+ mendukung filter kolom/row  
-
----
-
-## 📝 9. Step-by-Step Ringkas
-
-1. Setup Docker network & containers  
-2. Konfigurasi publisher (`wal_level`, slots, role, hba)  
-3. Buat tabel & publication di publisher  
-4. Buat tabel subscriber (jika `copy_data=false`)  
-5. Buat subscription  
-6. Test insert & sinkronisasi  
-7. Reset data & identity jika perlu  
-8. Debug dengan `pg_stat_subscription`  
-
----
-
-## 🎯 10. Kesimpulan
-
-- **Logical replication** = fleksibel untuk partial sync, reporting, integrasi sistem  
-- **Physical replication** = cocok untuk HA / backup full DB  
-- Selalu cek status subscription, drop sebelum drop tabel, sesuaikan `copy_data` dengan kebutuhan
