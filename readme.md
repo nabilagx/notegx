@@ -174,6 +174,3 @@ Setelah demo selesai, jalankan perintah ini di terminal awal (bukan `psql`) untu
 docker-compose down -v
 ```
 
------
-
-Tinggal *copy-paste* aja, Bil. Lo bisa\! Santai, tarik napas. Anggep aja lagi ngelesin. 😂
