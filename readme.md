@@ -75,7 +75,7 @@ volumes:
 ## Langkah 2: Jalankan Semua Kontainer
 
 Buka terminal di folder yang sama dengan file `docker-compose.yml` dan jalankan:
-*(Jelasin ke dosen: "Perintah ini akan menyalakan 3 server sekaligus, 1 coordinator dan 2 worker")*
+
 
 ```bash
 docker-compose up -d
@@ -88,7 +88,6 @@ docker-compose up -d
 ## Langkah 3: Masuk ke Coordinator dan Daftarkan Worker
 
 1.  Masuk ke `psql` di dalam kontainer `citus_coordinator` (Primary Node):
-    *(Jelasin ke dosen: "Sekarang saya akan masuk ke server Primary/Coordinator-nya untuk mendaftarkan 2 server worker tadi")*
 
     ```bash
     docker-compose exec citus_coordinator psql -U postgres
@@ -111,7 +110,6 @@ docker-compose up -d
 ## Langkah 4: Verifikasi (BUKTI TUGAS)
 
 Masih di dalam `psql`, jalankan perintah ini untuk membuktikan 1 Primary (Coordinator) sudah mengenali 2 Shard (Worker).
-*(Jelasin ke dosen: "Nah, Pak/Bu, ini adalah buktinya. Perintah ini menunjukkan daftar worker node yang aktif, dan bisa dilihat `citus_worker_1` dan `citus_worker_2` sudah terdaftar")*
 
 ```sql
 SELECT * FROM citus_get_active_worker_nodes();
@@ -122,8 +120,6 @@ SELECT * FROM citus_get_active_worker_nodes();
 -----
 
 ## Langkah 5: (Demo Implementasi) Uji Coba Sharding
-
-*(Jelasin ke dosen: "Sebagai implementasi, saya akan coba buat tabel terdistribusi")*
 
 1.  Buat tabel `users`:
 
@@ -136,7 +132,6 @@ SELECT * FROM citus_get_active_worker_nodes();
     ```
 
 2.  Ubah tabel `users` menjadi tabel terdistribusi (sharding) berdasarkan kolom `id`:
-    *(Jelasin ke dosen: "Perintah ini akan 'memecah' tabel users berdasarkan ID-nya")*
 
     ```sql
     SELECT create_distributed_table('users', 'id');
@@ -168,7 +163,6 @@ SELECT * FROM citus_get_active_worker_nodes();
 ## Langkah 6: Hentikan dan Bersihkan Demo
 
 Setelah demo selesai, jalankan perintah ini di terminal awal (bukan `psql`) untuk mematikan dan menghapus semua kontainer & volume.
-*(Jelasin ke dosen: "Terakhir, ini perintah untuk mematikan semua server yang tadi berjalan")*
 
 ```bash
 docker-compose down -v
